@@ -1,0 +1,42 @@
+{
+    "switch_modules_addresses": [
+        {
+            "description": "Switch Module S1",
+            "model": "05-000-02",
+            "address": "1624",
+            "channels": [
+                {"description": "Output 1"},
+                {"description": "Output 2"},
+                {"description": "Output 3"},
+                {"description": "Output 4"},
+                {"description": "Output 5"},
+                {"description": "Output 6"},
+                {"description": "Output 7"},
+                {"description": "Output 8"},
+                {"description": "Output 9"},
+                {"description": "Output 10"},
+                {"description": "Output 11"},
+                {"description": "Output 12"}
+            ]
+        },
+        {
+            "description": "Switch Module S2",
+            "model": "05-000-02",
+            "address": "AC30",
+            "channels": [
+                {"description": "Output 1"},
+                {"description": "Output 2"},
+                {"description": "Output 3"},
+                {"description": "Output 4"},
+                {"description": "Output 5"},
+                {"description": "Output 6"},
+                {"description": "Output 7"},
+                {"description": "Output 8"},
+                {"description": "Output 9"},
+                {"description": "Output 10"},
+                {"description": "Output 11"},
+                {"description": "Output 12"}
+            ]
+        }
+    ]
+}
