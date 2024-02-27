@@ -58,8 +58,12 @@ class NikobusButtonEntity(CoordinatorEntity, ButtonEntity):
             "manufacturer": BRAND,
             "model": "Push Button"
         }
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Return extra attributes."""
+        return {"impacted_module": f"{self.impacted_module_address}_{self.impacted_module_group}"}
 
     async def async_press(self) -> None:
         """Handle the button press."""
         _LOGGER.debug("Nikobus Button Pressed")
-        # await self._nikobus.send_command("your_command_here")
+        await self._dataservice.send_button_press(self._address)

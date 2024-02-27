@@ -8,6 +8,8 @@ import textwrap
 from pathlib import Path
 import aiofiles
 
+from homeassistant.helpers.dispatcher import async_dispatcher_send, async_dispatcher_connect
+
 from .helpers import (
     int_to_hex, 
     hex_to_int, 
@@ -21,8 +23,6 @@ from .helpers import (
     calculate_group_output_number, 
     calculate_group_number
 )
-
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +78,20 @@ class Nikobus:
         async with aiofiles.open(button_config_file_path, mode='w') as file:
             await file.write(json.dumps(self.json_button_data, indent=4))
 
+    async def convert_from_openhab(self):
+        openhab_config_file_path = self._hass.config.path("org.openhab.core.thing.Thing.json")
+        async with aiofiles.open(openhab_config_file_path, mode='r') as file:
+            self.json_openhab_button_data = json.loads(await file.read())
+        for key, value in self.json_openhab_button_data.items():
+            if "nikobus:push-button" in key:
+                new_button = {
+                    "description": value["value"]["label"],
+                    "address": value["value"]["configuration"]["address"],
+                    "impacted_module": [{"address": value["value"]["configuration"].get("impactedModules", "N/A"), "group": ""}]
+                }
+                self.json_button_data.setdefault("nikobus_button", []).append(new_button)
+        await self.write_json_button_data()
+
     async def connect(self):
         _LOGGER.debug("----- Nikobus.connect() enter -----")
         try:
@@ -131,28 +145,10 @@ class Nikobus:
             _LOGGER.error("Error in event listener: %s", str(e), exc_info=True)
 
     async def handle_message(self, message):
-        _button_command_prefix = '#N'  # The prefix to look for
+        _button_command_prefix = '#N'  # The prefix of a button
         if message.startswith(_button_command_prefix):
-            # Extract the address from the message starting from the 2nd character to the end
-            address = message[2:8]  
-            _LOGGER.info(f"Found a button: {message} at {address}")
-            _LOGGER.info("Current button %s", self.json_button_data)
-            new_button = {
-                "description": f"Nikobus Button #N{address}",
-                "address": address,  # Use the extracted address
-                "impacted_module": [
-                    {"address": "", "group": ""}
-                ]
-            }
-            # Check if a button with the same address already exists
-            address_exists = any(button['address'] == new_button['address'] for button in self.json_button_data['nikobus_button'])
-            if not address_exists:
-                self.json_button_data["nikobus_button"].append(new_button)
-                # async_dispatcher_send(self._hass, 'nikobus_new_button_added', new_button)
-                _LOGGER.info("New button added. %s", self.json_button_data)
-                await self.write_json_button_data()
-            else:
-                _LOGGER.info("A button with the same address already exists.")
+            address = message[2:8] 
+            await self.button_discovery(address)
         else:
             _LOGGER.info(f"Posting message: {message}")
             await self._response_queue.put(message)
@@ -198,8 +194,58 @@ class Nikobus:
     
         # Return True to indicate successful refresh
         return True
+    
+    async def button_discovery(self, address):
+        _LOGGER.debug(f"Found a button at {address}")
+
+        # Flag to check if the button has been handled
+        button_handled = False
+
+        # Iterate over the button configurations
+        for button in self.json_button_data['nikobus_button']:
+            if button['address'] == address:
+                # Button is configured, handle the press and send event to HA
+                self._hass.bus.async_fire('nikobus_button_pressed', {'address': address})
+                for module in button['impacted_module']:
+                    impacted_module_address = module['address']
+                    impacted_group = module['group']
+                    if 'command' in module:
+                        cover_command = module['command']
+                        cover_button = True
+                    # Ensure both impacted module address and group are specified
+                    if impacted_module_address and impacted_group:
+                        try:
+                            if cover_button:
+                                await self.button_press_cover(impacted_module_address, impacted_group, cover_command)
+                                cover_button = False
+                            else:
+                                await self.get_output_state(impacted_module_address, impacted_group)
+                            _LOGGER.debug(f"Handled button press for module {impacted_module_address} in group {impacted_group}.")
+                        except Exception as e:
+                            _LOGGER.error(f"Error handling button press for address {address}: {e}")
+                button_handled = True
+                break
+
+        # If no existing configuration matches the button press, add a new configuration
+        if not button_handled:
+            new_button = {
+                "description": f"Nikobus Button #N{address}",
+                "address": address,
+                "impacted_module": [{"address": "", "group": ""}]  # Placeholder for new configuration
+            }
+            _LOGGER.warning(f"No configuration found for button with address {address}. Adding new configuration.")
+            self.json_button_data["nikobus_button"].append(new_button)
+            await self.write_json_button_data()
+            # await self.convert_from_openhab()
+            _LOGGER.debug("New button configuration added: %s", new_button)
+
+    def button_press_cover(self, address, impacted_group, cover_command):
+        """Handle button press from Nikobus system for cover"""
+        async_dispatcher_send(self._hass, f"nikobus_cover_update_{address}{impacted_group}", {'command': cover_command})
 
     async def send_command(self, command):
+        _LOGGER.debug('----- Nikobus.send_command() enter -----')
+        _LOGGER.debug(f'command = {command.encode()}')
         try:
             # Acquire the lock to ensure exclusive access to _nikobus_writer
             async with self._nikobus_writer_lock:
@@ -242,9 +288,9 @@ class Nikobus:
     async def get_output_state(self, address, group):
         _LOGGER.debug('----- NikobusApi.get_output_state() enter -----')
         _LOGGER.debug(f'address = {address}, group = {group}')
-        if group == 1:
+        if int(group) == 1:
             cmd = make_pc_link_command(0x12, address)
-        elif group == 2:
+        elif int(group) == 2:
             cmd = make_pc_link_command(0x17, address)
         else:
             raise ValueError("Invalid group number")
@@ -253,9 +299,9 @@ class Nikobus:
     async def set_output_state(self, address, group_number, value):
         _LOGGER.debug('----- NikobusApi.setOutputState() enter -----')
         _LOGGER.debug(f'address = {address}, group = {group_number}, value = {value}')
-        if group_number == 1:
+        if int(group_number) == 1:
             cmd = make_pc_link_command(0x15, address, value + 'FF')
-        elif group_number == 2:
+        elif int(group_number) == 2:
             cmd = make_pc_link_command(0x16, address, value + 'FF')
         else:
             raise ValueError("Invalid group number")
@@ -335,3 +381,10 @@ class Nikobus:
         """Close the cover."""
         await self.set_value_at_address_shutter(address, channel, '02')
 #####
+
+#### BUTTONS
+    async def send_button_press(self, address) -> None:
+        start_of_transmission = '#N'
+        end_of_transmission = "\r#E1";
+        await self.send_command(start_of_transmission + address + end_of_transmission)
+#### 

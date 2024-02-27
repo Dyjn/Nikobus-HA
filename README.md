@@ -1,23 +1,33 @@
 # Nikobus-HA
 
-**Work in progress** BETA
-
 **fully implemented**
-- Switches control
-- Lights control (dimmers)
+- Switches control.
+- Lights control (dimmers).
+- Cover/shutter support, (open/stop/close/set position).
+- Buttons support. When a HA button is pressed, it will trigger the command on Nikobus. When a wall switch is pressed, it will trigger the refresh in HA.
+    
+You can create "virtual button" in HA and link them to an action in Nikobus. eg 000001
 
-**beta**
-- cover/shutter support, (open/stop/close) are working well. Now I'm working to introduce an "operation_time" definition by channel. So HA can simulate cover position based on execution time and use set_postion for covers.
-- buttons support, when a wall switch is pressed, it is discovered by the integration and registered in the nikobus_button_config.json file. Still need to trigger associated module / group refresh when pressed. (WIP)
+Automation example 
+
+```
+alias: "React to Nikobus Button Push"
+description: "Perform actions when a Nikobus button is reported as pushed"
+trigger:
+  - platform: event
+    event_type: nikobus_button_pressed
+    event_data:
+      address: "specific_button_address"  # Optional: Specify if you want to react to a specific button
+action:
+  - service: homeassistant.toggle
+    entity_id: light.example_light
+```
 
 **BREAKING CHANGES**
 The configuration files are no longer in the custom_integration directory but shall be placed in the HA/config. See install
 
-**open issues**
-- When you change status of a switch / dimmer / shutter outside HA, eg wallswitch, it is not updated till next refresh 60secs (WIP). Will be solved when button press will be managed in HA
-- setting cover position do not work. you can open/stop/close only 
-
 **Install**
+
 You will need a RS232 to IP bridge for this integration to work (like HF2211 or others), as work complete with this proof of concept, I'm planning to extend to serial connectivity.
 
 ![image](https://github.com/fdebrus/Nikobus-HA/assets/33791533/2451b88a-beff-46ce-85bf-f5486a69b37c)

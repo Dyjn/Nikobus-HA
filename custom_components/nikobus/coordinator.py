@@ -153,3 +153,8 @@ class NikobusDataCoordinator(DataUpdateCoordinator):
         """Stop the cover."""
         await self.api.stop_cover(address, channel)
 #### 
+
+#### BUTTONS
+    async def send_button_press(self, address) -> None:
+        await self.api.send_button_press(address)
+#### 
